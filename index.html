@@ -23,6 +23,10 @@
     <div class="slogan">扫一扫条码，价格马上知道</div>
   </header>
 
+  <div class="wechat-banner" v-if="isWeChat">
+    ⚠️ 微信里无法扫码：点右上角「···」→「在浏览器打开」
+  </div>
+
   <!-- ============ 扫码（首页） ============ -->
   <main v-show="tab==='scan'" class="page">
     <button class="btn btn-scan-huge" @click="openScan">
@@ -92,14 +96,16 @@
 
     <div class="card">
       <div class="card-title">📲 安装到手机主屏幕</div>
+      <div class="badge-fail" v-if="isWeChat">⚠️ 现在是在微信里打开，装不了！点右上角「···」选「在浏览器打开」，或复制链接后用 Safari（蓝色指南针图标）打开</div>
       <button class="btn btn-primary" v-if="installEvt" @click="installApp">一键安装</button>
-      <template v-if="isIOS">
-        <p><b>iPhone（Safari 浏览器）：</b></p>
+      <p class="muted small" v-else-if="isStandalone" style="margin:0">✅ 本机已安装到主屏幕，无需重复安装。</p>
+      <template v-else-if="isIOS">
+        <p><b>iPhone 安装步骤（必须用 Safari 打开）：</b></p>
         <ol class="install-steps">
-          <li>用 Safari 打开本页面</li>
-          <li>点底部中间的「分享」按钮 <b>⬆️</b></li>
-          <li>往下找到「添加到主屏幕」</li>
-          <li>点「添加」，桌面就出现图标了</li>
+          <li>确认是<b>Safari 浏览器</b>（图标是蓝色指南针 🧭）打开的本页面；从微信里点开的不行</li>
+          <li>看<b>手机屏幕最底部</b> Safari 自带的那条工具栏——<u>不是</u>页面里的「扫码/商品/设置」。中间有个<b>方框加向上箭头 ⬆️</b>，这就是「分享」按钮（如果看不到，把页面往回滑一下，工具栏就弹出来了）</li>
+          <li>点 ⬆️ 分享按钮，在弹出的菜单里<b>往下找「添加到主屏幕」</b></li>
+          <li>点右上角「添加」——桌面就出现「包姐查价」图标了</li>
         </ol>
       </template>
       <template v-else-if="!installEvt">

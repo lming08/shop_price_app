@@ -45,6 +45,13 @@ const App = {
       const ua = navigator.userAgent || '';
       return /iphone|ipad|ipod/i.test(ua) ||
         (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    },
+    isWeChat() {
+      return /MicroMessenger/i.test(navigator.userAgent || '');
+    },
+    isStandalone() {
+      return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+        window.navigator.standalone === true;
     }
   },
 
