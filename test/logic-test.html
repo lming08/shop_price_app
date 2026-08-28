@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>数据逻辑自测</title>
+  <style>
+    body { font-family: -apple-system, "PingFang SC", sans-serif; max-width: 640px; margin: 30px auto; padding: 0 16px; }
+    .row { padding: 8px 12px; border-bottom: 1px solid #eee; }
+    .pass { color: #16A34A; font-weight: 700; }
+    .fail { color: #DC2626; font-weight: 700; }
+    #summary { font-size: 1.2rem; font-weight: 800; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <h2>数据逻辑自测</h2>
+  <div id="list"></div>
+  <div id="summary"></div>
+
+  <script src="../lib/xlsx.full.min.js"></script>
+  <script src="../js/db.js"></script>
+  <script src="../js/excel.js"></script>
+  <script src="../js/backup.js"></script>
+  <script>
+    'use strict';
+    const results = [];
+    function check(name, ok, detail) {
+      results.push({ name, ok });
+      document.getElementById('list').insertAdjacentHTML('beforeend',
+        `<div class="row"><span class="${ok ? 'pass' : 'fail'}">${ok ? '✅' : '❌'}</span> ${name}` +
+        (detail ? ` —— ${detail}` : '') + '</div>');
+    }
+
+    async function fakePhoto() {
+      const c = document.createElement('canvas');
+      c.width = 60; c.height = 60;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#e05a2b'; ctx.fillRect(0, 0, 60, 60);
+      return new Promise(r => c.toBlob(r, 'image/jpeg', 0.7));
+    }
+
+    async function run() {
+      try {
+        await DB.clearAll();
+
+        // --- DB 增删改查 ---
+        const photo = await fakePhoto();
+        const p1 = await DB.put({ barcode: '6901236343104', name: '农夫山泉 550ml', price: 2, unit: '瓶', photo });
+        check('新增有条码商品（id=条码）', p1.id === '6901236343104' && p1.price === 2);
+        const p2 = await DB.put({ barcode: '', name: '茶叶蛋', price: 1.5, unit: '个' });
+        check('新增无条码商品（自动 id）', p2.id && p2.id !== '茶叶蛋');
+        await DB.put({ barcode: '6920584430052', name: '可口可乐 330ml', price: 3, unit: '罐' });
+        await DB.put({ barcode: '6920202888888', name: '王老吉 310ml', price: 4, unit: '罐' });
+
+        const byBc = await DB.getByBarcode('6901236343104');
+        check('按条码查询', !!byBc && byBc.name === '农夫山泉 550ml');
+        check('照片以 Blob 存储', byBc.photo instanceof Blob);
+
+        const upd = await DB.put({ id: '6901236343104', barcode: '6901236343104', name: '农夫山泉 550ml', price: 2.5, unit: '瓶' });
+        check('改价格（未传照片保留原照片）', upd.price === 2.5 && upd.photo instanceof Blob);
+
+        try { await DB.put({ barcode: '', name: '坏数据', price: 0 }); check('价格校验拦截', false); }
+        catch (e) { check('价格校验拦截', /价格/.test(e.message)); }
+        try { await DB.put({ barcode: '', name: '', price: 3 }); check('名称校验拦截', false); }
+        catch (e) { check('名称校验拦截', /名称/.test(e.message)); }
+
+        let all = await DB.all();
+        check('列表数量', all.length === 4, '当前 ' + all.length + ' 条');
+        check('列表按更新时间倒序', all[0].updatedAt >= all[all.length - 1].updatedAt);
+
+        // --- Excel/CSV 导入解析（表头乱序 + 容错） ---
+        const csv = [
+          '商品名称,单价,条形码,单位,备注',
+          '冰红茶 500ml,3.5,6920202888889,瓶,',
+          '乐事薯片原味,¥6.5,6924743912345,包,新到的',
+          '抽奖券,1,0888888888888,张,前导零条码',
+          ',,',
+          ',2,12345,个,',
+          '奥利奥,abc,222222,包,'
+        ].join('\n');
+        const csvFile = new File([csv], 't.csv', { type: 'text/csv' });
+        const parsed = await ExcelIO.parseImport(csvFile);
+        const iceTea = parsed.products.find(p => p.name === '冰红茶 500ml');
+        const chips = parsed.products.find(p => p.name === '乐事薯片原味');
+        const lottery = parsed.products.find(p => p.name === '抽奖券');
+        check('CSV 按表头匹配乱序列', !!iceTea && !!chips && parsed.products.length === 3,
+          '解析出 ' + parsed.products.length + ' 条');
+        check('价格容错（¥ 符号）', !!chips && chips.price === 6.5);
+        check('条码前导零保留', !!lottery && lottery.barcode === '0888888888888',
+          lottery ? String(lottery.barcode) : '无');
+        check('非法行进入错误列表', parsed.errors.length >= 2, parsed.errors.join('；'));
+
+        // --- Excel 导出 → 重新导入 往返 ---
+        all = await DB.all();
+        const aoa = [['条形码', '商品名称', '价格(元)', '单位', '备注']];
+        all.forEach(p => aoa.push([p.barcode || '', p.name, p.price, p.unit || '', p.notes || '']));
+        const wbX = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wbX, XLSX.utils.aoa_to_sheet(aoa), '价格表');
+        const xlsxData = XLSX.write(wbX, { bookType: 'xlsx', type: 'array' });
+        const xFile = new File([xlsxData], 'roundtrip.xlsx',
+          { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const back = await ExcelIO.parseImport(xFile);
+        check('Excel 导出→导入往返', back.products.length === all.length &&
+          back.products.every((p, i) => p.barcode === all[i].barcode && p.price === all[i].price),
+          back.products.length + ' 条');
+
+        // --- 备份文件解析 + 恢复合并 ---
+        const b64 = await ImageUtil.blobToDataURL(photo);
+        const backupObj = {
+          app: 'baojie-price-backup', version: 1, exportedAt: new Date().toISOString(),
+          products: [{ id: 'x1', barcode: '1111111111111', name: '测试备份商品', price: 9.9, unit: '个',
+                       notes: '', photo: b64, createdAt: 1, updatedAt: 2 }]
+        };
+        const bFile = new File([JSON.stringify(backupObj)], 'b.json', { type: 'application/json' });
+        const bList = await Backup.parseBackupFile(bFile);
+        check('备份文件解析（照片转回 Blob）', bList.length === 1 && bList[0].photo instanceof Blob);
+        try { await Backup.parseBackupFile(new File(['{"a":1}'], 'x.json')); check('备份文件校验拦截', false); }
+        catch (e) { check('备份文件校验拦截', true); }
+        const merged = await DB.importMerge(bList, true);
+        check('备份恢复合并', merged.added === 1);
+
+        // --- importMerge 覆盖语义 ---
+        const m2 = await DB.importMerge([{ barcode: '6901236343104', name: '农夫山泉 550ml', price: 3.5, unit: '瓶', photo: null }], true);
+        const after = await DB.getByBarcode('6901236343104');
+        check('同条码导入覆盖价格', m2.updated === 1 && after.price === 3.5);
+
+        all = await DB.all();
+        check('最终库内数量', all.length === 5, '当前 ' + all.length + ' 条');
+
+        await DB.clearAll();
+        check('测试后清库', (await DB.count()) === 0);
+      } catch (e) {
+        check('整体流程', false, '异常中断：' + (e && e.stack ? e.stack : e));
+      }
+
+      const pass = results.filter(r => r.ok).length;
+      const total = results.length;
+      document.getElementById('summary').innerHTML = pass === total
+        ? `<span class="pass">全部通过：${pass}/${total}</span>`
+        : `<span class="fail">通过 ${pass}/${total}，存在失败项</span>`;
+      document.title = pass === total ? 'LOGIC-TEST-ALL-PASS' : 'LOGIC-TEST-FAILED';
+    }
+
+    run();
+  </script>
+</body>
+</html>

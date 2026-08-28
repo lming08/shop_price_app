@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>扫码链路自测</title>
+  <style>
+    body { font-family: -apple-system, "PingFang SC", sans-serif; max-width: 640px; margin: 30px auto; padding: 0 16px; }
+    .case { border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+    .pass { color: #16A34A; font-weight: 700; }
+    .fail { color: #DC2626; font-weight: 700; }
+    canvas { border: 1px solid #eee; max-width: 100%; }
+    pre { background: #f6f6f6; padding: 10px; border-radius: 8px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h2>扫码链路自测（无需真实摄像头）</h2>
+  <p>页面在本地生成一张标准 EAN-13 条码图片，分别用两条解码路径识别，验证解码管线可用。</p>
+
+  <div class="case">
+    <b>测试条码：<span id="expected"></span></b>
+    <div><canvas id="bc" width="640" height="260"></canvas></div>
+  </div>
+
+  <div class="case">
+    <b>路径 1 —— 原生 BarcodeDetector（安卓 Chrome）：</b>
+    <div id="r1">未运行</div>
+  </div>
+  <div class="case">
+    <b>路径 2 —— html5-qrcode / ZXing（iOS 兜底）scanFile：</b>
+    <div id="r2">未运行</div>
+  </div>
+  <div class="case">
+    <b>路径 3 —— 用手机拍的真实条码照片：</b>
+    <input type="file" accept="image/*" id="file" onchange="runUserFile(this.files[0])">
+    <div id="r3"></div>
+    <img id="preview" style="max-width:100%;display:none">
+  </div>
+
+  <div id="h5box"></div>
+
+  <script src="../lib/html5-qrcode.min.js"></script>
+  <script>
+    'use strict';
+    // ---------- EAN-13 生成 ----------
+    const L = ['0001101','0011001','0010011','0111101','0100011','0110001','0101111','0111011','0110111','0001011'];
+    const G = ['0100111','0110011','0011011','0100001','0011101','0111001','0000101','0010001','0001001','0010111'];
+    const R = ['1110010','1100110','1101100','1000010','1011100','1001110','1010000','1000100','1001000','1110100'];
+    const PARITY = ['LLLLLL','LLGLGG','LLGGLG','LLGGGL','LGLLGG','LGGLLG','LGGGLL','LGLGLG','LGLGGL','LGGLGL'];
+
+    function ean13Check(digits12) {
+      let sum = 0;
+      for (let i = 0; i < 12; i++) sum += Number(digits12[i]) * (i % 2 === 0 ? 1 : 3);
+      return String((10 - sum % 10) % 10);
+    }
+
+    function drawEAN13(canvas, code13) {
+      const ctx = canvas.getContext('2d');
+      const W = canvas.width, H = canvas.height;
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, W, H);
+      const bits = ['101'];
+      const parity = PARITY[Number(code13[0])];
+      for (let i = 1; i <= 6; i++) {
+        bits.push(parity[i - 1] === 'L' ? L[Number(code13[i])] : G[Number(code13[i])]);
+      }
+      bits.push('01010');
+      for (let i = 7; i <= 12; i++) bits.push(R[Number(code13[i])]);
+      bits.push('101');
+      const pattern = bits.join('');
+      const unit = W / (pattern.length + 16); // 两侧留白
+      ctx.fillStyle = '#000';
+      const x0 = 8 * unit;
+      for (let i = 0; i < pattern.length; i++) {
+        if (pattern[i] === '1') {
+          ctx.fillRect(x0 + i * unit, 10, Math.max(2, unit), H - 60);
+        }
+      }
+      ctx.fillStyle = '#000';
+      ctx.font = '28px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(code13, W / 2, H - 14);
+    }
+
+    // ---------- 测试 ----------
+    const CODE12 = '690123634310';
+    const EXPECTED = CODE12 + ean13Check(CODE12);
+    document.getElementById('expected').textContent = EXPECTED;
+    drawEAN13(document.getElementById('bc'), EXPECTED);
+
+    function report(id, ok, msg) {
+      document.getElementById(id).innerHTML =
+        `<span class="${ok ? 'pass' : 'fail'}">${ok ? '✅ 通过' : '❌ 失败'}</span> <pre>${msg}</pre>`;
+    }
+
+    async function testNative() {
+      if (typeof window.BarcodeDetector !== 'function') {
+        report('r1', true, '当前浏览器没有 BarcodeDetector（iOS 正常现象），运行时将走 html5-qrcode 兜底');
+        return;
+      }
+      try {
+        const detector = new window.BarcodeDetector({
+          formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf']
+        });
+        const codes = await detector.detect(document.getElementById('bc'));
+        const text = codes.length ? codes[0].rawValue : '(没识别到)';
+        report('r1', text === EXPECTED, `期望 ${EXPECTED}，识别到 ${text}`);
+      } catch (e) {
+        report('r1', false, String(e));
+      }
+    }
+
+    async function testHtml5(file) {
+      try {
+        const h5 = new Html5Qrcode('h5box', { verbose: false });
+        const text = await h5.scanFile(file, true);
+        await h5.clear();
+        report('r2', text === EXPECTED, `期望 ${EXPECTED}，识别到 ${text}`);
+      } catch (e) {
+        report('r2', false, String(e));
+      }
+    }
+
+    function canvasToFile() {
+      return new Promise((resolve) => {
+        document.getElementById('bc').toBlob(async (blob) => {
+          resolve(new File([blob], 'test-ean13.png', { type: 'image/png' }));
+        }, 'image/png');
+      });
+    }
+
+    async function runUserFile(file) {
+      if (!file) return;
+      const img = document.getElementById('preview');
+      img.src = URL.createObjectURL(file);
+      img.style.display = 'block';
+      try {
+        const h5 = new Html5Qrcode('h5box', { verbose: false });
+        const text = await h5.scanFile(file, false);
+        await h5.clear();
+        report('r3', !!text, `识别到：${text}`);
+      } catch (e) {
+        report('r3', false, '识别失败：' + String(e));
+      }
+    }
+
+    (async () => {
+      await testNative();
+      const f = await canvasToFile();
+      await testHtml5(f);
+    })();
+  </script>
+</body>
+</html>

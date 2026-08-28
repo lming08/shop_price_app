@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+  <title>包姐便利店 · 查价格</title>
+  <meta name="description" content="扫条码快速查商品价格，包姐便利店家人专用">
+  <meta name="theme-color" content="#EA580C">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="包姐查价">
+  <link rel="stylesheet" href="css/app.css">
+  <style>[v-cloak]{display:none}</style>
+</head>
+<body>
+<div id="app" v-cloak>
+
+  <header class="app-header">
+    <div class="store">🏪 包姐便利店</div>
+    <div class="slogan">扫一扫条码，价格马上知道</div>
+  </header>
+
+  <!-- ============ 扫码（首页） ============ -->
+  <main v-show="tab==='scan'" class="page">
+    <button class="btn btn-scan-huge" @click="openScan">
+      <span class="icon">📷</span>
+      <span>扫码查价格</span>
+    </button>
+
+    <div class="card" style="margin-top:18px">
+      <div class="field" style="margin-bottom:12px">
+        <label>条码扫不出来？手动输入</label>
+        <input v-model.trim="manualCode" inputmode="numeric" placeholder="输入包装上的条形码数字"
+               @keyup.enter="lookupManual">
+      </div>
+      <button class="btn btn-primary" @click="lookupManual">查 价 格</button>
+    </div>
+
+    <div class="card" v-if="recent.length">
+      <div class="card-title">🕐 最近查过</div>
+      <div class="recent-item" v-for="r in recent" :key="r.id + r.at" @click="openRecent(r)">
+        <span>{{ r.name }}</span>
+        <span class="r-price">¥{{ fmtPrice(r.price) }}</span>
+      </div>
+    </div>
+
+    <div class="card" v-if="!loading && products.length===0">
+      <div class="card-title">👋 第一次使用？</div>
+      <p class="muted">先在「设置」里用 Excel 导入商品价格表，<br>或到「商品」里逐个添加商品。</p>
+      <button class="btn btn-primary" @click="tab='products'">去添加商品</button>
+      <button class="btn btn-secondary" @click="tab='settings'">去导入 Excel</button>
+    </div>
+  </main>
+
+  <!-- ============ 商品列表 ============ -->
+  <main v-show="tab==='products'" class="page">
+    <div class="search-bar">
+      <span class="s-icon">🔍</span>
+      <input v-model.trim="q" placeholder="搜商品名或条码">
+    </div>
+
+    <button class="btn btn-primary" @click="openAdd">＋ 添加商品</button>
+    <div style="height:16px"></div>
+
+    <ul class="product-list" v-if="filteredProducts.length">
+      <li class="product-item" v-for="p in filteredProducts" :key="p.id" @click="showResult(p)">
+        <img class="p-photo" v-if="p.photo" :src="photoURL(p)">
+        <div class="p-photo-empty" v-else>🛒</div>
+        <div class="p-info">
+          <div class="p-name">{{ p.name }}</div>
+          <div class="p-meta">{{ p.barcode || '无条码' }}<template v-if="fmtUnit(p.unit)"> · {{ fmtUnit(p.unit) }}</template></div>
+        </div>
+        <div class="p-price">¥{{ fmtPrice(p.price) }}</div>
+      </li>
+    </ul>
+    <div class="empty-tip" v-else>
+      <div class="e-icon">📦</div>
+      <div>{{ q ? '没有找到相关商品' : '还没有商品，点上面「添加商品」' }}</div>
+    </div>
+  </main>
+
+  <!-- ============ 设置 ============ -->
+  <main v-show="tab==='settings'" class="page">
+    <div class="card">
+      <div class="card-title">📊 商品数据</div>
+      <div class="stat-row"><span>商品总数</span><b>{{ products.length }} 个</b></div>
+      <div class="stat-row"><span>有条码的商品</span><b>{{ barcodeCount }} 个</b></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📲 安装到手机主屏幕</div>
+      <button class="btn btn-primary" v-if="installEvt" @click="installApp">一键安装</button>
+      <template v-if="isIOS">
+        <p><b>iPhone（Safari 浏览器）：</b></p>
+        <ol class="install-steps">
+          <li>用 Safari 打开本页面</li>
+          <li>点底部中间的「分享」按钮 <b>⬆️</b></li>
+          <li>往下找到「添加到主屏幕」</li>
+          <li>点「添加」，桌面就出现图标了</li>
+        </ol>
+      </template>
+      <template v-else-if="!installEvt">
+        <p><b>安卓手机：</b></p>
+        <ol class="install-steps">
+          <li>点浏览器右上角「⋮」菜单</li>
+          <li>选择「添加到主屏幕」或「安装应用」</li>
+        </ol>
+      </template>
+      <p class="muted small" style="margin-top:10px">安装后像正常 App 一样点开使用，不占内存、不用商店下载。</p>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📄 Excel 导入 / 导出</div>
+      <p class="muted small">表格列：条形码、商品名称、价格、单位、备注（有条形码的商品才能扫码查价）</p>
+      <button class="btn btn-primary" @click="pickExcel">📥 导入 Excel 价格表</button>
+      <button class="btn btn-secondary" @click="exportExcel">📤 导出价格表（可打印）</button>
+      <button class="btn btn-ghost" @click="downloadTemplate">⬇️ 下载导入模板</button>
+      <input type="file" ref="excelInput" accept=".xlsx,.xls,.csv" style="display:none" @change="onExcelFile">
+      <template v-if="report">
+        <div class="divider"></div>
+        <div class="card-title" style="font-size:1rem">最近一次导入结果</div>
+        <div class="stat-row"><span>新增</span><b>{{ report.added }} 个</b></div>
+        <div class="stat-row"><span>更新</span><b>{{ report.updated }} 个</b></div>
+        <div class="stat-row"><span>跳过</span><b>{{ report.skipped }} 个</b></div>
+        <template v-if="report.failed.length">
+          <div class="badge-fail" v-for="f in report.failed.slice(0,5)" :key="f.row + f.reason">
+            第 {{ f.row }} 行：{{ f.reason }}
+          </div>
+        </template>
+      </template>
+    </div>
+
+    <div class="card">
+      <div class="card-title">💾 备份 / 恢复（换手机用）</div>
+      <p class="muted small">数据存在本手机里。换手机或复制给家人时：先「导出备份文件」，再把文件发到新手机上「恢复」。</p>
+      <button class="btn btn-secondary" @click="exportBackup">📤 导出备份文件（含照片）</button>
+      <button class="btn btn-secondary" @click="pickBackup">📥 从备份文件恢复</button>
+      <input type="file" ref="backupInput" accept=".json,application/json" style="display:none" @change="onBackupFile">
+    </div>
+
+    <div class="card">
+      <div class="card-title">🗑️ 危险操作</div>
+      <button class="btn btn-danger" @click="clearAllData">清空全部商品数据</button>
+    </div>
+
+    <p class="muted small" style="text-align:center;margin:24px 0 8px">包姐便利店 · 家人专用 v1.0</p>
+  </main>
+
+  <!-- ============ 底部导航 ============ -->
+  <nav class="tabbar">
+    <button :class="{active: tab==='scan'}" @click="tab='scan'"><span class="t-icon">📷</span>扫码</button>
+    <button :class="{active: tab==='products'}" @click="tab='products'"><span class="t-icon">📦</span>商品</button>
+    <button :class="{active: tab==='settings'}" @click="tab='settings'"><span class="t-icon">⚙️</span>设置</button>
+  </nav>
+
+  <!-- ============ 查价结果弹层 ============ -->
+  <div class="overlay" v-if="result.show" @click.self="closeResult">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+
+      <!-- 找到了 -->
+      <template v-if="result.product">
+        <div class="result-top">
+          <img class="r-photo" v-if="resultPhotoURL" :src="resultPhotoURL">
+          <div class="r-photo-empty" v-else>🛒</div>
+          <div class="r-info">
+            <div class="r-name">{{ result.product.name }}</div>
+            <div class="r-meta">
+              {{ result.product.barcode || '无条码' }}
+              <template v-if="fmtUnit(result.product.unit)"> · 按{{ fmtUnit(result.product.unit) }}卖</template>
+            </div>
+          </div>
+        </div>
+
+        <div class="price-block" v-if="!result.editingPrice">
+          <div class="p-label">卖这个价</div>
+          <div class="p-value">
+            <span class="yen">¥</span>{{ fmtPrice(result.product.price) }}<span class="p-unit" v-if="fmtUnit(result.product.unit)">/{{ fmtUnit(result.product.unit) }}</span>
+          </div>
+        </div>
+        <div class="field" v-else style="margin:20px 0">
+          <label>改成新价格<span class="req">*</span></label>
+          <input v-model.trim="result.priceDraft" inputmode="decimal" placeholder="例如 3.5" style="font-size:1.6rem;text-align:center">
+          <button class="btn btn-primary" style="margin-top:12px" @click="savePrice">保存新价格</button>
+          <button class="btn btn-secondary" @click="result.editingPrice=false">不改了</button>
+        </div>
+
+        <p class="muted small" v-if="result.product.notes" style="margin:0 0 6px">📝 {{ result.product.notes }}</p>
+        <p class="muted small" style="margin:0 0 16px">价格更新于 {{ fmtWhen(result.product.updatedAt) }}</p>
+
+        <button class="btn btn-secondary" v-if="!result.editingPrice" @click="startEditPrice">✏️ 价格变了？改价格</button>
+        <button class="btn btn-secondary" v-if="!result.editingPrice" @click="editProduct(result.product)">编辑商品信息</button>
+        <button class="btn btn-primary" @click="closeResult(); openScan()">🔄 继续扫码</button>
+        <button class="btn btn-ghost" @click="closeResult">关 闭</button>
+      </template>
+
+      <!-- 没找到 -->
+      <template v-else>
+        <div class="empty-tip">
+          <div class="e-icon">😕</div>
+          <div style="font-size:1.25rem;font-weight:800">没有找到这个商品</div>
+          <div class="muted" style="margin-top:8px">条码：{{ result.barcode }}</div>
+        </div>
+        <button class="btn btn-primary" @click="addFromScanMiss">＋ 添加这个商品</button>
+        <button class="btn btn-secondary" @click="closeResult(); openScan()">🔄 再扫一次</button>
+        <button class="btn btn-ghost" @click="closeResult">关 闭</button>
+      </template>
+    </div>
+  </div>
+
+  <!-- ============ 添加 / 编辑商品 ============ -->
+  <div class="overlay" v-if="edit.show">
+    <div class="sheet" style="min-height:86vh">
+      <div class="sheet-handle"></div>
+      <h3 class="card-title" style="font-size:1.3rem">{{ edit.id ? '编辑商品' : '添加商品' }}</h3>
+
+      <div class="field">
+        <label>商品照片</label>
+        <div class="photo-box">
+          <img v-if="edit.photoPreview" :src="edit.photoPreview">
+          <div class="ph-empty" v-else>🛒</div>
+          <div class="ph-actions">
+            <button class="btn btn-secondary" @click="$refs.photoCamera.click()">📷 拍照</button>
+            <button class="btn btn-secondary" @click="$refs.photoAlbum.click()">🖼 从相册选</button>
+            <button class="btn btn-ghost btn-sm" v-if="edit.photoBlob || edit.photoPreview" @click="removePhoto">删除照片</button>
+          </div>
+        </div>
+        <input type="file" ref="photoCamera" accept="image/*" capture="environment" style="display:none" @change="onPhotoChange">
+        <input type="file" ref="photoAlbum" accept="image/*" style="display:none" @change="onPhotoChange">
+      </div>
+
+      <div class="field">
+        <label>条形码</label>
+        <input v-model.trim="edit.form.barcode" inputmode="numeric" placeholder="扫码添加会自动填上">
+        <div class="hint">有条码的商品才能用「扫码查价格」</div>
+      </div>
+
+      <div class="field">
+        <label>商品名称 <span class="req">*</span></label>
+        <input v-model.trim="edit.form.name" placeholder="例如：农夫山泉 550ml">
+      </div>
+
+      <div class="field">
+        <label>价格（元）<span class="req">*</span></label>
+        <input v-model.trim="edit.form.price" inputmode="decimal" placeholder="例如 3.5" style="font-size:1.5rem">
+      </div>
+
+      <div class="field">
+        <label>单位</label>
+        <input v-model.trim="edit.form.unit" placeholder="瓶 / 袋 / 包 / 罐…">
+        <div class="hint">默认填 1（按件卖），不用改；散装商品可改成 瓶 / 袋 / 斤 等</div>
+      </div>
+
+      <div class="field">
+        <label>备注</label>
+        <textarea v-model.trim="edit.form.notes" placeholder="例如：放在门口冰柜第二层"></textarea>
+      </div>
+
+      <button class="btn btn-primary" @click="saveProduct">✅ 保 存</button>
+      <button class="btn btn-danger" v-if="edit.id" @click="deleteProduct">删除这个商品</button>
+      <button class="btn btn-ghost" @click="closeEdit">取 消</button>
+    </div>
+  </div>
+
+  <!-- ============ 扫码全屏 ============ -->
+  <div class="scan-layer" v-if="scan.active">
+    <button class="scan-close" @click="closeScan">✕</button>
+    <div class="scan-viewport" ref="scanViewport" id="scan-viewport">
+      <video ref="scanVideo" v-show="scan.engine==='native'" playsinline muted></video>
+      <div class="scan-frame"><span class="corner-bl"></span><span class="corner-br"></span></div>
+      <div class="scan-tip">{{ scan.starting ? '正在打开摄像头，请稍等…' : '把商品条码对准方框，会自动识别' }}</div>
+      <div class="scan-error" v-if="scan.error">
+        <div style="font-size:2.6rem">📷</div>
+        <div>{{ scan.error }}</div>
+        <button class="btn btn-secondary" @click="closeScan">关 闭</button>
+      </div>
+    </div>
+    <div class="scan-actions">
+      <div class="card" v-if="scan.manualShow" style="margin:0">
+        <div class="field" style="margin-bottom:10px">
+          <input v-model.trim="scan.manualCode" inputmode="numeric" placeholder="输入条形码数字"
+                 style="text-align:center;font-size:1.3rem" @keyup.enter="handleCode(scan.manualCode)">
+        </div>
+        <button class="btn btn-primary" @click="handleCode(scan.manualCode)">查 价 格</button>
+      </div>
+      <button class="btn btn-secondary" v-else @click="scan.manualShow=true">⌨️ 条码磨损？手动输入</button>
+      <button class="btn btn-danger" @click="closeScan">关 闭 扫 码</button>
+    </div>
+  </div>
+
+  <!-- ============ 提示 ============ -->
+  <div class="toast" v-if="toast.text" :class="{err: toast.err}">{{ toast.text }}</div>
+</div>
+
+<script src="lib/vue.global.prod.js"></script>
+<script src="lib/html5-qrcode.min.js"></script>
+<script src="lib/xlsx.full.min.js"></script>
+<script src="js/db.js"></script>
+<script src="js/scanner.js"></script>
+<script src="js/excel.js"></script>
+<script src="js/backup.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
