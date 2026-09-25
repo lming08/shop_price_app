@@ -278,10 +278,11 @@
   <!-- ============ 扫码全屏 ============ -->
   <div class="scan-layer" v-if="scan.active">
     <button class="scan-close" @click="closeScan">✕</button>
-    <div class="scan-viewport" ref="scanViewport" id="scan-viewport">
-      <video ref="scanVideo" v-show="scan.engine==='native'" playsinline muted></video>
+    <div class="scan-viewport">
+      <video ref="scanVideo" class="scan-video" playsinline muted></video>
+      <div class="scan-camera" id="scan-camera"></div>
       <div class="scan-frame"><span class="corner-bl"></span><span class="corner-br"></span></div>
-      <div class="scan-tip">{{ scan.starting ? '正在打开摄像头，请稍等…' : '把商品条码对准方框，会自动识别' }}</div>
+      <div class="scan-tip">{{ scanTip }}</div>
       <div class="scan-error" v-if="scan.error">
         <div style="font-size:2.6rem">📷</div>
         <div>{{ scan.error }}</div>

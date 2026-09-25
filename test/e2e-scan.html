@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>SCAN-E2E-PENDING</title>
+</head>
+<body style="background:#111;color:#7CFC00;font:15px/1.5 monospace;margin:20px">
+  <h3 style="margin:0 0 10px">扫码端到端自测（canvas 合成条码视频流 → 真实 Scanner/解码引擎）</h3>
+  <pre id="log">启动中…</pre>
+  <video id="v" playsinline muted style="width:360px;margin-top:10px;border:1px solid #333"></video>
+  <canvas id="src" width="1280" height="720" style="width:240px;border:1px solid #333;margin-top:10px"></canvas>
+  <!-- html5-qrcode 专用容器：必须保持为空且可见（隐藏的 video 不产生帧） -->
+  <div id="cam" style="width:240px;height:180px;border:1px solid #333;margin-top:10px"></div>
+
+  <script src="../lib/html5-qrcode.min.js"></script>
+  <script src="../js/scanner.js"></script>
+  <script>
+    'use strict';
+    const EXPECTED = '6901236343104';
+
+    // ---- EAN-13 绘制到 canvas（与 scan-test.html 同一套编码表）----
+    const L = ['0001101','0011001','0010011','0111101','0100011','0110001','0101111','0111011','0110111','0001011'];
+    const G = ['0100111','0110011','0011011','0100001','0011101','0111001','0000101','0010001','0001001','0010111'];
+    const R = ['1110010','1100110','1101100','1000010','1011100','1001110','1010000','1000100','1001000','1110100'];
+    const PARITY = ['LLLLLL','LLGLGG','LLGGLG','LLGGGL','LGLLGG','LGGLLG','LGGGLL','LGLGLG','LGLGGL','LGGLGL'];
+
+    function drawBarcode(code13, canvas) {
+      const ctx = canvas.getContext('2d');
+      const W = canvas.width, H = canvas.height;
+      ctx.fillStyle = '#f5f5f5';
+      ctx.fillRect(0, 0, W, H);
+      const bits = ['101'];
+      const par = PARITY[Number(code13[0])];
+      for (let i = 1; i <= 6; i++) bits.push((par[i-1] === 'L' ? L : G)[Number(code13[i])]);
+      bits.push('01010');
+      for (let i = 7; i <= 12; i++) bits.push(R[Number(code13[i])]);
+      bits.push('101');
+      const pattern = bits.join('');
+      const mod = 6, quiet = 12 * mod;
+      const x0 = Math.floor((W - (pattern.length * mod + quiet * 2)) / 2);
+      const y0 = Math.floor(H / 2 - 160);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(x0 - 10, y0 - 30, pattern.length * mod + quiet * 2 + 20, 390);
+      ctx.fillStyle = '#000';
+      let x = x0 + quiet;
+      for (const b of pattern) {
+        if (b === '1') ctx.fillRect(x, y0, mod, 320);
+        x += mod;
+      }
+    }
+
+    const finish = async (status, payload) => {
+      if (window.__finished) return;
+      window.__finished = true;
+      if (window.__timeoutTimer) clearTimeout(window.__timeoutTimer);
+      let devices = null;
+      try {
+        const list = await navigator.mediaDevices.enumerateDevices();
+        devices = list.filter(d => d.kind === 'videoinput').map(d => d.label || '(无标签)');
+      } catch (e) { devices = ['枚举失败: ' + e.message]; }
+      const payloadOut = Object.assign({}, payload || {});
+      if (window.__probe) payloadOut.probe = window.__probe;
+      const body = {
+        status,
+        tag: new URLSearchParams(location.search).get('tag') || '',
+        engine: window.__engine || null,
+        expected: EXPECTED,
+        payload: payloadOut,
+        videoInputs: devices,
+        secureContext: window.isSecureContext,
+        at: new Date().toISOString()
+      };
+      document.title = 'SCAN-E2E-' + status + (payload && payload.code === EXPECTED ? '-MATCH' : '');
+      document.getElementById('log').textContent = JSON.stringify(body, null, 1);
+      try {
+        await fetch('/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      } catch (e) { /* 上报失败也能看标题 */ }
+    };
+
+    (async () => {
+      const t0 = Date.now();
+      try {
+        // 1) 合成条码画面 → 视频流（周期性重绘，保证媒体流持续产帧）
+        const canvas = document.getElementById('src');
+        drawBarcode(EXPECTED, canvas);
+        const stream = canvas.captureStream(25);
+        setInterval(() => { drawBarcode(EXPECTED, canvas); }, 150);
+
+        // 诊断探针：视频帧状态 + 对 video / canvas 分别解码
+        const probe = setInterval(async () => {
+          try {
+            if (window.__probe || window.__probeBusy) return;
+            const v = document.getElementById('v');
+            if (v.readyState < 2 || !v.videoWidth) return;
+            window.__probeBusy = true;
+            const all = await window.BarcodeDetector.getSupportedFormats();
+            const fmts = all.filter(f => ['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf'].includes(f));
+            const det = new window.BarcodeDetector({ formats: fmts });
+            const onVideo = await det.detect(v).catch(e => [{ rawValue: 'ERR:' + e.message }]);
+            const onCanvas = await det.detect(canvas).catch(e => [{ rawValue: 'ERR:' + e.message }]);
+            window.__probe = {
+              formats: fmts,
+              readyState: v.readyState, w: v.videoWidth, h: v.videoHeight, t: Number(v.currentTime.toFixed(2)),
+              videoDetect: onVideo.map(c => c.rawValue), canvasDetect: onCanvas.map(c => c.rawValue)
+            };
+            clearInterval(probe);
+          } catch (e) { window.__probe = { err: String((e && e.message) || e) }; }
+        }, 400);
+
+        // 2) 用合成流替换摄像头（这两处是唯一被替换的环：物理摄像头）
+        navigator.mediaDevices.getUserMedia = async () => stream;
+        navigator.mediaDevices.enumerateDevices = async () => ([
+          { kind: 'videoinput', deviceId: 'synthetic-cam', groupId: 'g1', label: 'synthetic-cam' }
+        ]);
+
+        // 3) 跑真实 Scanner 代码路径
+        const video = document.getElementById('v');
+        const handle = await Scanner.start(
+          video,
+          'cam',
+          (text, err) => {
+            if (err) { finish('ERROR', { message: String((err && err.message) || err) }); return; }
+            if (text) { finish('DETECTED', { code: text, elapsedMs: Date.now() - t0 }); }
+          },
+          (eng, reason) => { window.__engine = eng + (reason ? '/' + reason : ''); }
+        );
+        window.__engine = handle.engine;
+        document.getElementById('log').textContent = '引擎=' + handle.engine + '，扫描中…（15 秒内未见条码则超时上报）';
+        window.__timeoutTimer = setTimeout(() => finish('TIMEOUT', {}), 15000);
+      } catch (e) {
+        finish('ERROR', { message: String((e && e.message) || e) });
+      }
+    })();
+  </script>
+</body>
+</html>

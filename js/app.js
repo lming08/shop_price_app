@@ -12,7 +12,7 @@ const App = {
       products: [],
       q: '',
       manualCode: '',
-      scan: { active: false, engine: '', error: '', manualShow: false, manualCode: '', starting: false, mode: 'lookup' },
+      scan: { active: false, engine: '', error: '', manualShow: false, manualCode: '', starting: false, ready: false, slow: false, mode: 'lookup' },
       result: { show: false, product: null, barcode: '', editingPrice: false, priceDraft: '' },
       edit: {
         show: false, id: null,
@@ -52,6 +52,15 @@ const App = {
     isStandalone() {
       return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
         window.navigator.standalone === true;
+    },
+    scanTip() {
+      if (this.scan.error) return '';
+      if (this.scan.starting) return '正在打开摄像头，请稍等…';
+      if (!this.scan.ready) return '把商品条码对准方框，会自动识别';
+      if (this.scan.slow) {
+        return '还没识别到？把手机拿远一点（约 15 厘米），让整条条码都在画面内，光线亮一些';
+      }
+      return '摄像头已就绪（' + (this.scan.engine === 'native' ? '高速识别' : '兼容识别') + '），把条码对准方框';
     }
   },
 
@@ -109,12 +118,14 @@ const App = {
       }
       this.scan = {
         active: true, engine: '', error: '', manualShow: false, manualCode: '', starting: true,
+        ready: false, slow: false,
         mode: typeof mode === 'string' ? mode : 'lookup'
       };
       await this.$nextTick();
+      this._clearScanTimers();
       // 权限弹窗等场景可能长时间无响应：9 秒后给出兜底提示
       let timedOut = false;
-      const timer = setTimeout(() => {
+      this._scanTimeoutTimer = setTimeout(() => {
         timedOut = true;
         this.scan.starting = false;
         this.scan.error = '打开摄像头超时：请在浏览器设置里允许使用相机，或点下方「手动输入」。';
@@ -122,23 +133,35 @@ const App = {
       try {
         const handle = await Scanner.start(
           this.$refs.scanVideo,
-          'scan-viewport',
-          (text, err) => this.onScanDetected(text, err)
+          'scan-camera',
+          (text, err) => this.onScanDetected(text, err),
+          (engine) => { this.scan.engine = engine; }
         );
-        clearTimeout(timer);
+        clearTimeout(this._scanTimeoutTimer);
+        this._scanTimeoutTimer = null;
         if (timedOut) { try { await handle.stop(); } catch (e) { /* ignore */ } return; }
         this._scanHandle = handle;
         this.scan.engine = handle.engine;
         this.scan.starting = false;
+        this.scan.ready = true;
+        // 识别几秒还没结果就给操作提示（离远一点 / 光线亮一点）
+        this._scanSlowTimer = setTimeout(() => { this.scan.slow = true; }, 7000);
       } catch (e) {
-        clearTimeout(timer);
+        clearTimeout(this._scanTimeoutTimer);
+        this._scanTimeoutTimer = null;
         this.scan.starting = false;
         this.scan.error = '打不开摄像头：' + (e && e.message ? e.message : '请允许使用摄像头') +
           '。也可以点下方「手动输入」。';
       }
     },
 
+    _clearScanTimers() {
+      if (this._scanTimeoutTimer) { clearTimeout(this._scanTimeoutTimer); this._scanTimeoutTimer = null; }
+      if (this._scanSlowTimer) { clearTimeout(this._scanSlowTimer); this._scanSlowTimer = null; }
+    },
+
     async closeScan() {
+      this._clearScanTimers();
       if (this._scanHandle) {
         try { await this._scanHandle.stop(); } catch (e) { /* ignore */ }
         this._scanHandle = null;

@@ -244,8 +244,11 @@ body {
 
 /* ---------- 扫码全屏 ---------- */
 .scan-layer { position: fixed; inset: 0; z-index: 60; background: #111; display: flex; flex-direction: column; }
-.scan-layer video, .scan-layer #scan-viewport video { width: 100%; height: 100%; object-fit: cover; }
 .scan-viewport { flex: 1; position: relative; overflow: hidden; }
+/* 原生引擎用自己的 video；html5-qrcode 往 #scan-camera 里注入 video（该容器必须保持为空） */
+.scan-video, .scan-camera { position: absolute; inset: 0; }
+.scan-video { width: 100%; height: 100%; object-fit: cover; background: #111; }
+.scan-camera video { width: 100% !important; height: 100% !important; object-fit: cover; }
 .scan-frame {
   position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%);
   width: 84%; height: 42%;
