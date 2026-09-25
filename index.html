@@ -298,7 +298,9 @@
         <button class="btn btn-primary" @click="submitScanManual">{{ scan.mode === 'lookup' ? '查 价 格' : '填 入 条 码' }}</button>
       </div>
       <button class="btn btn-secondary" v-else @click="scan.manualShow=true">⌨️ 条码磨损？手动输入</button>
+      <button class="btn btn-secondary" @click="pickScanImage">🖼 扫不出？用拍好的照片识别</button>
       <button class="btn btn-danger" @click="closeScan">关 闭 扫 码</button>
+      <input type="file" ref="scanImage" accept="image/*" style="display:none" @change="onScanImage">
     </div>
   </div>
 

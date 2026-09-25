@@ -12,7 +12,7 @@ const App = {
       products: [],
       q: '',
       manualCode: '',
-      scan: { active: false, engine: '', error: '', manualShow: false, manualCode: '', starting: false, ready: false, slow: false, mode: 'lookup' },
+      scan: { active: false, engine: '', error: '', manualShow: false, manualCode: '', starting: false, ready: false, slow: false, res: '', photoBusy: false, mode: 'lookup' },
       result: { show: false, product: null, barcode: '', editingPrice: false, priceDraft: '' },
       edit: {
         show: false, id: null,
@@ -55,12 +55,14 @@ const App = {
     },
     scanTip() {
       if (this.scan.error) return '';
+      if (this.scan.photoBusy) return '正在识别图片，请稍等…';
       if (this.scan.starting) return '正在打开摄像头，请稍等…';
       if (!this.scan.ready) return '把商品条码对准方框，会自动识别';
       if (this.scan.slow) {
-        return '还没识别到？把手机拿远一点（约 15 厘米），让整条条码都在画面内，光线亮一些';
+        return '还没识别到？把手机拿远一点（约 15 厘米）、光线亮一点，让整条条码都在画面内；也可点下面「用拍好的照片识别」';
       }
-      return '摄像头已就绪（' + (this.scan.engine === 'native' ? '高速识别' : '兼容识别') + '），把条码对准方框';
+      const engine = this.scan.engine === 'native' ? '高速识别' : '兼容识别';
+      return '摄像头已就绪（' + engine + (this.scan.res ? ' ' + this.scan.res : '') + '），把条码对准方框';
     }
   },
 
@@ -118,7 +120,7 @@ const App = {
       }
       this.scan = {
         active: true, engine: '', error: '', manualShow: false, manualCode: '', starting: true,
-        ready: false, slow: false,
+        ready: false, slow: false, res: '', photoBusy: false,
         mode: typeof mode === 'string' ? mode : 'lookup'
       };
       await this.$nextTick();
@@ -144,8 +146,17 @@ const App = {
         this.scan.engine = handle.engine;
         this.scan.starting = false;
         this.scan.ready = true;
-        // 识别几秒还没结果就给操作提示（离远一点 / 光线亮一点）
-        this._scanSlowTimer = setTimeout(() => { this.scan.slow = true; }, 7000);
+        // 读取实际画面分辨率（状态提示里显示，便于排查手机端问题）
+        setTimeout(() => {
+          try {
+            const v = (handle.engine === 'native')
+              ? this.$refs.scanVideo
+              : document.querySelector('#scan-camera video');
+            if (this.scan.active) this.scan.res = Scanner.videoSize(v);
+          } catch (e) { /* ignore */ }
+        }, 1200);
+        // 识别几秒还没结果就给操作提示（离远一点 / 光线亮一点 / 用相册图）
+        this._scanSlowTimer = setTimeout(() => { this.scan.slow = true; }, 5000);
       } catch (e) {
         clearTimeout(this._scanTimeoutTimer);
         this._scanTimeoutTimer = null;
@@ -184,8 +195,7 @@ const App = {
       const mode = this.scan.mode;
       // 命中即停：交由 closeScan 统一停相机、关图层
       this.closeScan();
-      if (mode === 'lookup') this.handleCode(text);
-      else this.applyScannedCode(text);
+      this.dispatchCode(mode, text);
     },
 
     /** 扫码层里的「手动输入」提交（按当前模式分发） */
@@ -194,6 +204,35 @@ const App = {
       if (!code) { this.showToast('请先输入条形码', true); return; }
       const mode = this.scan.mode;
       this.closeScan();
+      this.dispatchCode(mode, code);
+    },
+
+    /** 相册兜底：用拍好的照片识别条码 */
+    pickScanImage() {
+      this.$refs.scanImage.click();
+    },
+
+    async onScanImage(e) {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+      this.scan.photoBusy = true;
+      let code = null;
+      try { code = await Scanner.decodeImage(file); } catch (err) { code = null; }
+      this.scan.photoBusy = false;
+      if (!code) {
+        this.showToast('图片里没找到条码：把条码拍大一点、拍清楚一点再试', true);
+        return;
+      }
+      const mode = this.scan.mode;
+      await this.closeScan();
+      this.dispatchCode(mode, code);
+    },
+
+    /** 按扫码用途分发结果：查价 / 填表-建档 */
+    dispatchCode(mode, rawCode) {
+      const code = String(rawCode || '').trim();
+      if (!code) return;
       if (mode === 'lookup') this.handleCode(code);
       else this.applyScannedCode(code);
     },

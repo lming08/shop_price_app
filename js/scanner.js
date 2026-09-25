@@ -100,7 +100,7 @@ const Scanner = (() => {
     return { stop() { stopped = true; } };
   }
 
-  /** 启动后尽力把摄像头分辨率调高（EAN-13 窄条码更易识别）；失败无所谓 */
+  /** 启动后尽力把摄像头分辨率定到 720p（EAN-13 够用又不会拖慢 JS 解码）；失败无所谓 */
   function bumpResolution(elementId) {
     try {
       const video = document.querySelector('#' + elementId + ' video');
@@ -108,9 +108,15 @@ const Scanner = (() => {
         ? video.srcObject.getVideoTracks()[0]
         : null;
       if (track && typeof track.applyConstraints === 'function') {
-        track.applyConstraints({ width: { ideal: 1920 }, height: { ideal: 1080 } }).catch(() => {});
+        track.applyConstraints({ width: { ideal: 1280 }, height: { ideal: 720 } }).catch(() => {});
       }
     } catch (e) { /* ignore */ }
+  }
+
+  /** 当前生效画面分辨率（用于状态提示与远程诊断） */
+  function videoSize(videoEl) {
+    if (!videoEl || !videoEl.videoWidth) return '';
+    return videoEl.videoWidth + '×' + videoEl.videoHeight;
   }
 
   /** html5-qrcode 路径：全画面解码（不设 qrbox，避免"看到的框"和"解码区域"错位） */
@@ -145,6 +151,49 @@ const Scanner = (() => {
   }
 
   return {
+    videoSize,
+
+    /**
+     * 从图片文件里识别条码（相册兜底：拍好的照片直接识别）。
+     * 原生 BarcodeDetector 优先，ZXing（html5-qrcode scanFile）兜底。
+     * @returns {Promise<string|null>}
+     */
+    async decodeImage(file) {
+      // 1) 原生 BarcodeDetector（安卓）
+      try {
+        if (typeof window.BarcodeDetector === 'function') {
+          const fmts = await nativeFormats();
+          if (fmts.length) {
+            const bmp = await createImageBitmap(file);
+            const det = new window.BarcodeDetector({ formats: fmts });
+            const codes = await det.detect(bmp);
+            if (codes && codes.length) {
+              const text = String(codes[0].rawValue || '').trim();
+              if (text) return text;
+            }
+          }
+        }
+      } catch (e) { /* 继续走 ZXing */ }
+
+      // 2) ZXing 兜底（iOS 也支持）
+      const divId = 'scan-file-decode';
+      let div = document.getElementById(divId);
+      if (!div) {
+        div = document.createElement('div');
+        div.id = divId;
+        div.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px';
+        document.body.appendChild(div);
+      }
+      try {
+        const h5 = new Html5Qrcode(divId, { formatsToSupport: H5_FORMATS, verbose: false });
+        const text = await h5.scanFile(file, false);
+        await h5.clear();
+        return String(text || '').trim() || null;
+      } catch (e) {
+        return null;
+      }
+    },
+
     /**
      * 打开摄像头开始扫码。
      * @returns {Promise<{engine: string, stop: function}>}
