@@ -45,7 +45,12 @@ const Scanner = (() => {
 
   async function openCamera(videoEl) {
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+      video: {
+        facingMode: 'environment',
+        width: { ideal: 1920 }, height: { ideal: 1080 },
+        // 连续对焦：安卓生效，iOS 忽略；能显著改善近距离条码的清晰度
+        focusMode: 'continuous'
+      },
       audio: false
     });
     videoEl.setAttribute('playsinline', 'true');
@@ -108,7 +113,11 @@ const Scanner = (() => {
         ? video.srcObject.getVideoTracks()[0]
         : null;
       if (track && typeof track.applyConstraints === 'function') {
-        track.applyConstraints({ width: { ideal: 1280 }, height: { ideal: 720 } }).catch(() => {});
+        track.applyConstraints({
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          focusMode: 'continuous'
+        }).catch(() => {});
       }
     } catch (e) { /* ignore */ }
   }
@@ -155,27 +164,61 @@ const Scanner = (() => {
 
     /**
      * 从图片文件里识别条码（相册兜底：拍好的照片直接识别）。
-     * 原生 BarcodeDetector 优先，ZXing（html5-qrcode scanFile）兜底。
+     * 处理要点：
+     *  - 按 EXIF 摆正（手机拍的横竖屏照片）
+     *  - 限制最长边 2400px：手机原图（12MP~48MP）直接解码会超 iOS canvas 面积上限而失败
+     *  - 原生 BarcodeDetector 优先，ZXing（html5-qrcode scanFile）兜底
      * @returns {Promise<string|null>}
      */
     async decodeImage(file) {
-      // 1) 原生 BarcodeDetector（安卓）
+      const MAX_DIM = 2400;
+
+      // 1) 统一加载 → 摆正 → 限尺寸 到 canvas
+      let canvas = null;
       try {
-        if (typeof window.BarcodeDetector === 'function') {
+        let src = null;
+        try {
+          src = await createImageBitmap(file, { imageOrientation: 'from-image' });
+        } catch (e) {
+          src = await createImageBitmap(file);   // 老浏览器不支持 orientation 选项
+        }
+        canvas = document.createElement('canvas');
+        const scale = Math.min(1, MAX_DIM / Math.max(src.width, src.height));
+        canvas.width = Math.max(1, Math.round(src.width * scale));
+        canvas.height = Math.max(1, Math.round(src.height * scale));
+        canvas.getContext('2d').drawImage(src, 0, 0, canvas.width, canvas.height);
+      } catch (e) {
+        // 退路：用 <img> 加载（浏览器会自动应用 EXIF 方向）
+        try {
+          const url = URL.createObjectURL(file);
+          const img = new Image();
+          img.src = url;
+          await img.decode();
+          canvas = document.createElement('canvas');
+          const scale = Math.min(1, MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight));
+          canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+          canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+          URL.revokeObjectURL(url);
+        } catch (e2) { canvas = null; }
+      }
+
+      // 2) 原生 BarcodeDetector（安卓）
+      if (canvas && typeof window.BarcodeDetector === 'function') {
+        try {
           const fmts = await nativeFormats();
           if (fmts.length) {
-            const bmp = await createImageBitmap(file);
             const det = new window.BarcodeDetector({ formats: fmts });
-            const codes = await det.detect(bmp);
+            const codes = await det.detect(canvas);
             if (codes && codes.length) {
               const text = String(codes[0].rawValue || '').trim();
               if (text) return text;
             }
           }
-        }
-      } catch (e) { /* 继续走 ZXing */ }
+        } catch (e) { /* 继续走 ZXing */ }
+      }
 
-      // 2) ZXing 兜底（iOS 也支持）
+      // 3) ZXing 兜底（iOS 也支持）
       const divId = 'scan-file-decode';
       let div = document.getElementById(divId);
       if (!div) {
@@ -185,8 +228,13 @@ const Scanner = (() => {
         document.body.appendChild(div);
       }
       try {
+        let zxFile = file;
+        if (canvas) {
+          const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.92));
+          if (blob) zxFile = new File([blob], 'scan.jpg', { type: 'image/jpeg' });
+        }
         const h5 = new Html5Qrcode(divId, { formatsToSupport: H5_FORMATS, verbose: false });
-        const text = await h5.scanFile(file, false);
+        const text = await h5.scanFile(zxFile, false);
         await h5.clear();
         return String(text || '').trim() || null;
       } catch (e) {

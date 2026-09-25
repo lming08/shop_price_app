@@ -2,7 +2,7 @@
  * 注意：更新前端文件后把这里和 js/version.js 的版本号一起 +1，老用户才能拿到新版本 */
 'use strict';
 
-const CACHE = 'baojie-price-v10';
+const CACHE = 'baojie-price-v11';
 const ASSETS = [
   './',
   'index.html',

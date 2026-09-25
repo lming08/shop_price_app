@@ -3,7 +3,7 @@
 'use strict';
 
 const APP_BUILD = {
-  version: 'v10',
+  version: 'v11',
   date: '2026-09-26',
-  note: '打开即自动检查更新，新版本自动生效'
+  note: '照片识别更稳：超大照片、横竖屏照片都能读'
 };

@@ -68,7 +68,7 @@ const App = {
       if (this.scan.starting) return '正在打开摄像头，请稍等…';
       if (!this.scan.ready) return '把商品条码对准方框，会自动识别';
       if (this.scan.slow) {
-        return '还没识别到？把手机拿远一点（约 15 厘米）、光线亮一点，让整条条码都在画面内；也可点下面「用拍好的照片识别」';
+        return '还没识别到？手机别贴太近（20 厘米左右最清楚，太近会拍虚），让整条条码都在画面内、光线亮一点；也可点下面「用拍好的照片识别」';
       }
       const engine = this.scan.engine === 'native' ? '高速识别' : '兼容识别';
       return '摄像头已就绪（' + engine + (this.scan.res ? ' ' + this.scan.res : '') + '），把条码对准方框';
