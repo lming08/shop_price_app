@@ -149,6 +149,19 @@ body {
 .field .hint { font-size: .88rem; color: var(--muted); margin-top: 6px; }
 .field input[readonly] { background: #FEF3EC; color: var(--muted); }
 
+/* 输入框 + 行内扫码按钮 */
+.field-row { display: flex; gap: 10px; align-items: stretch; }
+.field-row input { flex: 1; min-width: 0; }
+.btn-scan-inline {
+  width: auto;
+  min-height: 58px;
+  padding: 0 18px;
+  font-size: 1.08rem;
+  border-radius: 14px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 /* 拍照区 */
 .photo-box {
   display: flex; align-items: center; gap: 16px;

@@ -12,7 +12,7 @@ const App = {
       products: [],
       q: '',
       manualCode: '',
-      scan: { active: false, engine: '', error: '', manualShow: false, manualCode: '', starting: false },
+      scan: { active: false, engine: '', error: '', manualShow: false, manualCode: '', starting: false, mode: 'lookup' },
       result: { show: false, product: null, barcode: '', editingPrice: false, priceDraft: '' },
       edit: {
         show: false, id: null,
@@ -97,13 +97,20 @@ const App = {
       this.loading = false;
     },
 
-    /* ---------- 扫码 ---------- */
-    async openScan() {
+    /* ---------- 扫码 ----------
+     * mode: 'lookup' 扫码查价（默认）
+     *       'add'    商品页「扫码添加商品」：没建档就去新建，已建档直接显示该商品
+     *       'fill'   表单里「扫条码」：只把条码填进当前表单
+     */
+    async openScan(mode) {
       if (!window.isSecureContext) {
         this.showToast('摄像头需要 HTTPS 环境，请通过 https:// 网址打开', true);
         return;
       }
-      this.scan = { active: true, engine: '', error: '', manualShow: false, manualCode: '', starting: true };
+      this.scan = {
+        active: true, engine: '', error: '', manualShow: false, manualCode: '', starting: true,
+        mode: typeof mode === 'string' ? mode : 'lookup'
+      };
       await this.$nextTick();
       // 权限弹窗等场景可能长时间无响应：9 秒后给出兜底提示
       let timedOut = false;
@@ -151,9 +158,45 @@ const App = {
         return;
       }
       if (!text) return;
+      const mode = this.scan.mode;
       // 命中即停：交由 closeScan 统一停相机、关图层
       this.closeScan();
-      this.handleCode(text);
+      if (mode === 'lookup') this.handleCode(text);
+      else this.applyScannedCode(text);
+    },
+
+    /** 扫码层里的「手动输入」提交（按当前模式分发） */
+    submitScanManual() {
+      const code = String(this.scan.manualCode || '').trim();
+      if (!code) { this.showToast('请先输入条形码', true); return; }
+      const mode = this.scan.mode;
+      this.closeScan();
+      if (mode === 'lookup') this.handleCode(code);
+      else this.applyScannedCode(code);
+    },
+
+    /** 扫到条码后（添加/编辑场景）：填表或引导新建 */
+    async applyScannedCode(code) {
+      const bc = String(code || '').trim();
+      if (!bc) return;
+      const dup = await DB.getByBarcode(bc);
+
+      // 表单已打开（在添加/编辑表单里扫的）：只填入条码
+      if (this.edit.show) {
+        this.edit.form.barcode = bc;
+        this.showToast(dup ? '⚠️ 注意：这个条码已有商品「' + dup.name + '」' : '✅ 已扫到条码 ' + bc, !!dup);
+        return;
+      }
+      // 已建档：直接显示该商品，避免重复建
+      if (dup) {
+        this.showToast('这个条码已经有商品了：' + dup.name, true);
+        this.showResult(dup);
+        return;
+      }
+      // 新商品：打开表单并把条码填好
+      this.openAdd();
+      this.edit.form.barcode = bc;
+      this.showToast('✅ 已扫到条码 ' + bc + '，请填名称和价格');
     },
 
     async handleCode(code) {

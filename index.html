@@ -29,7 +29,7 @@
 
   <!-- ============ 扫码（首页） ============ -->
   <main v-show="tab==='scan'" class="page">
-    <button class="btn btn-scan-huge" @click="openScan">
+    <button class="btn btn-scan-huge" @click="openScan()">
       <span class="icon">📷</span>
       <span>扫码查价格</span>
     </button>
@@ -66,7 +66,8 @@
       <input v-model.trim="q" placeholder="搜商品名或条码">
     </div>
 
-    <button class="btn btn-primary" @click="openAdd">＋ 添加商品</button>
+    <button class="btn btn-primary" @click="openScan('add')">📷 扫码添加商品</button>
+    <button class="btn btn-secondary" @click="openAdd">＋ 手动添加</button>
     <div style="height:16px"></div>
 
     <ul class="product-list" v-if="filteredProducts.length">
@@ -240,7 +241,10 @@
 
       <div class="field">
         <label>条形码</label>
-        <input v-model.trim="edit.form.barcode" inputmode="numeric" placeholder="扫码添加会自动填上">
+        <div class="field-row">
+          <input v-model.trim="edit.form.barcode" inputmode="numeric" placeholder="点右边「扫条码」或手动输入">
+          <button class="btn btn-secondary btn-scan-inline" @click="openScan('fill')">📷 扫条码</button>
+        </div>
         <div class="hint">有条码的商品才能用「扫码查价格」</div>
       </div>
 
@@ -288,9 +292,9 @@
       <div class="card" v-if="scan.manualShow" style="margin:0">
         <div class="field" style="margin-bottom:10px">
           <input v-model.trim="scan.manualCode" inputmode="numeric" placeholder="输入条形码数字"
-                 style="text-align:center;font-size:1.3rem" @keyup.enter="handleCode(scan.manualCode)">
+                 style="text-align:center;font-size:1.3rem" @keyup.enter="submitScanManual">
         </div>
-        <button class="btn btn-primary" @click="handleCode(scan.manualCode)">查 价 格</button>
+        <button class="btn btn-primary" @click="submitScanManual">{{ scan.mode === 'lookup' ? '查 价 格' : '填 入 条 码' }}</button>
       </div>
       <button class="btn btn-secondary" v-else @click="scan.manualShow=true">⌨️ 条码磨损？手动输入</button>
       <button class="btn btn-danger" @click="closeScan">关 闭 扫 码</button>
