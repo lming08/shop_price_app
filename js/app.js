@@ -53,6 +53,15 @@ const App = {
       return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
         window.navigator.standalone === true;
     },
+    appVersion() {
+      return (typeof APP_BUILD !== 'undefined' && APP_BUILD.version) ? APP_BUILD.version : '未知';
+    },
+    appBuildDate() {
+      return (typeof APP_BUILD !== 'undefined' && APP_BUILD.date) ? APP_BUILD.date : '未知';
+    },
+    appNote() {
+      return (typeof APP_BUILD !== 'undefined' && APP_BUILD.note) ? APP_BUILD.note : '';
+    },
     scanTip() {
       if (this.scan.error) return '';
       if (this.scan.photoBusy) return '正在识别图片，请稍等…';
@@ -484,6 +493,40 @@ const App = {
       await DB.clearAll();
       await this.refresh();
       this.showToast('已清空全部数据');
+    },
+
+    /* ---------- 版本与更新 ---------- */
+    async checkUpdate() {
+      let latest = '';
+      try {
+        const resp = await fetch('sw.js', { cache: 'no-store' });
+        const text = await resp.text();
+        const m = text.match(/baojie-price-(v\d+)/);
+        latest = m ? m[1] : '';
+      } catch (e) { /* 下面统一处理 */ }
+      if (!latest) { this.showToast('检查更新失败：网络不通，请稍后再试', true); return; }
+      if (latest === this.appVersion) {
+        this.showToast('✅ 已是最新版本（' + latest + '）');
+        return;
+      }
+      // 服务器上有新版本：让 Service Worker 拉取新文件，然后自动刷新
+      this.showToast('发现新版本 ' + latest + '，正在更新…');
+      try {
+        if ('serviceWorker' in navigator) {
+          const reg = await navigator.serviceWorker.getRegistration();
+          if (reg) {
+            await reg.update();
+            await new Promise((resolve) => {
+              const t = setTimeout(resolve, 3000);
+              navigator.serviceWorker.addEventListener('controllerchange', () => {
+                clearTimeout(t);
+                resolve();
+              }, { once: true });
+            });
+          }
+        }
+      } catch (e) { /* 刷新兜底 */ }
+      setTimeout(() => location.reload(), 300);
     },
 
     /* ---------- PWA 安装 ---------- */

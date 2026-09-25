@@ -1,14 +1,15 @@
 /* 包姐便利店 · 查价 —— Service Worker：预缓存全部文件，离线可用
- * 注意：更新前端文件后请把 CACHE 版本号 +1，老用户才能拿到新版本 */
+ * 注意：更新前端文件后把这里和 js/version.js 的版本号一起 +1，老用户才能拿到新版本 */
 'use strict';
 
-const CACHE = 'baojie-price-v7';
+const CACHE = 'baojie-price-v8';
 const ASSETS = [
   './',
   'index.html',
   'manifest.json',
   'css/app.css',
   'js/db.js',
+  'js/version.js',
   'js/scanner.js',
   'js/excel.js',
   'js/backup.js',
