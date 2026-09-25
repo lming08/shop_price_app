@@ -2,7 +2,7 @@
  * 注意：更新前端文件后把这里和 js/version.js 的版本号一起 +1，老用户才能拿到新版本 */
 'use strict';
 
-const CACHE = 'baojie-price-v8';
+const CACHE = 'baojie-price-v10';
 const ASSETS = [
   './',
   'index.html',
@@ -33,6 +33,10 @@ self.addEventListener('activate', (e) => {
       .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
+});
+
+self.addEventListener('message', (e) => {
+  if (e.data === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('fetch', (e) => {

@@ -3,7 +3,7 @@
 'use strict';
 
 const APP_BUILD = {
-  version: 'v8',
+  version: 'v10',
   date: '2026-09-26',
-  note: '扫码提速 + 照片识别兜底 + 版本检查'
+  note: '打开即自动检查更新，新版本自动生效'
 };

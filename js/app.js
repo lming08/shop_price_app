@@ -542,7 +542,19 @@ const App = {
     this.loadRecent();
 
     if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
-      navigator.serviceWorker.register('sw.js').catch(() => { /* 本地 file:// 调试时忽略 */ });
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
+        // 每次打开都主动检查新版本：绕开浏览器最长 24 小时的更新节流
+        try { reg.update(); } catch (e) { /* ignore */ }
+      }).catch(() => { /* 本地 file:// 调试时忽略 */ });
+
+      // 新版本安装并接管后自动刷新一次（首次安装不刷新）
+      let hadController = !!navigator.serviceWorker.controller;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!hadController) { hadController = true; return; }
+        if (this._reloading) return;
+        this._reloading = true;
+        location.reload();
+      });
     }
 
     window.addEventListener('beforeinstallprompt', (e) => {
