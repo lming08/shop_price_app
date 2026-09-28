@@ -2,7 +2,7 @@
  * 注意：更新前端文件后把这里和 js/version.js 的版本号一起 +1，老用户才能拿到新版本 */
 'use strict';
 
-const CACHE = 'baojie-price-v12';
+const CACHE = 'baojie-price-v13';
 const ASSETS = [
   './',
   'index.html',
@@ -15,7 +15,7 @@ const ASSETS = [
   'js/backup.js',
   'js/app.js',
   'lib/vue.global.prod.js',
-  'lib/html5-qrcode.min.js',
+  'lib/zxing.min.js',
   'lib/xlsx.full.min.js',
   'icons/icon-192.png',
   'icons/icon-512.png'

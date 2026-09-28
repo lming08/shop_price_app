@@ -3,7 +3,7 @@
 'use strict';
 
 const APP_BUILD = {
-  version: 'v12',
+  version: 'v13',
   date: '2026-09-26',
-  note: '照片识别三轮兜底，失败时提示图片尺寸与格式'
+  note: '扫码引擎重写：iPhone 改用 zxing-js 正规解码（修复 iPhone 扫码无反应）'
 };
