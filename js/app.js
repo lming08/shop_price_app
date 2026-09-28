@@ -221,19 +221,36 @@ const App = {
       this.$refs.scanImage.click();
     },
 
+    /** 只停相机引擎、保留扫码层（识别相册图前必须先停：html5-qrcode 在相机扫描中会拒绝文件识别） */
+    async stopScanEngine() {
+      this._clearScanTimers();
+      if (this._scanHandle) {
+        try { await this._scanHandle.stop(); } catch (e) { /* ignore */ }
+        this._scanHandle = null;
+      }
+      this.scan.ready = false;
+      this.scan.starting = false;
+    },
+
     async onScanImage(e) {
       const file = e.target.files && e.target.files[0];
       e.target.value = '';
       if (!file) return;
+      const mode = this.scan.mode;
+      // 关键：文件识别与相机扫描互斥，先停相机再解码
+      await this.stopScanEngine();
       this.scan.photoBusy = true;
-      let code = null;
-      try { code = await Scanner.decodeImage(file); } catch (err) { code = null; }
+      let res = null;
+      try { res = await Scanner.decodeImage(file); } catch (err) { res = null; }
       this.scan.photoBusy = false;
+      const code = res && res.code;
       if (!code) {
-        this.showToast('图片里没找到条码：把条码拍大一点、拍清楚一点再试', true);
+        const info = (res && res.info) || {};
+        this.showToast('图片里没找到条码（' + (info.size || '读取失败') +
+          (info.type ? ' ' + info.type : '') + '）：选清晰的整张照片再试', true);
+        if (this.scan.active) this.openScan(mode);   // 重开相机，方便继续扫码
         return;
       }
-      const mode = this.scan.mode;
       await this.closeScan();
       this.dispatchCode(mode, code);
     },

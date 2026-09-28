@@ -164,82 +164,125 @@ const Scanner = (() => {
 
     /**
      * 从图片文件里识别条码（相册兜底：拍好的照片直接识别）。
-     * 处理要点：
-     *  - 按 EXIF 摆正（手机拍的横竖屏照片）
-     *  - 限制最长边 2400px：手机原图（12MP~48MP）直接解码会超 iOS canvas 面积上限而失败
-     *  - 原生 BarcodeDetector 优先，ZXing（html5-qrcode scanFile）兜底
-     * @returns {Promise<string|null>}
+     * 三轮尝试，尽量兜住各种手机照片：
+     *   ① 摆正并限制尺寸后的整图（防超大原图超 iOS canvas 上限）
+     *   ② 居中裁剪并放大（条码在画面里占比较小时，相当于数码变焦）
+     *   ③ 原始文件直接解码（防 canvas 环节在个别机型上异常）
+     * @returns {Promise<{code: string|null, info: object}>}
      */
     async decodeImage(file) {
       const MAX_DIM = 2400;
+      const info = { type: String(file.type || '未知').replace('image/', ''), size: '读取失败', tried: [] };
 
-      // 1) 统一加载 → 摆正 → 限尺寸 到 canvas
-      let canvas = null;
+      const nativeFmtsCache = { value: null };
+      async function nativeFmtsOnce() {
+        if (nativeFmtsCache.value === null) nativeFmtsCache.value = await nativeFormats();
+        return nativeFmtsCache.value;
+      }
+      async function tryNative(source) {
+        if (typeof window.BarcodeDetector !== 'function') return null;
+        const fmts = await nativeFmtsOnce();
+        if (!fmts.length) return null;
+        try {
+          const det = new window.BarcodeDetector({ formats: fmts });
+          const codes = await det.detect(source);
+          return (codes && codes.length) ? (String(codes[0].rawValue || '').trim() || null) : null;
+        } catch (e) { return null; }
+      }
+      async function tryZXing(source) {
+        // 每次都用全新的容器：html5-qrcode 的状态管理器按元素共享，失败后残留状态会影响下一次
+        const elId = 'scan-file-decode-' + Math.random().toString(36).slice(2, 7);
+        const el = document.createElement('div');
+        el.id = elId;
+        el.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px';
+        document.body.appendChild(el);
+        try {
+          let f = source;
+          if (typeof HTMLCanvasElement !== 'undefined' && source instanceof HTMLCanvasElement) {
+            const blob = await new Promise(res => source.toBlob(res, 'image/jpeg', 0.92));
+            if (!blob) return null;
+            f = new File([blob], 'scan.jpg', { type: 'image/jpeg' });
+          }
+          const h5 = new Html5Qrcode(elId, { formatsToSupport: H5_FORMATS, verbose: false });
+          const raw = await h5.scanFile(f, false);
+          const text = String(raw || '').trim() || null;
+          try { await h5.clear(); } catch (e) { /* ignore */ }
+          return text;
+        } catch (e) {
+          return null;
+        } finally {
+          el.remove();
+        }
+      }
+      /** 居中裁剪并适度放大（数码变焦），帮助识别画面里较小的条码 */
+      function centerCropZoom(src, ratio, targetW, maxZoom) {
+        const cw = Math.max(1, Math.round(src.width * ratio));
+        const ch = Math.max(1, Math.round(src.height * ratio));
+        const x = Math.round((src.width - cw) / 2);
+        const y = Math.round((src.height - ch) / 2);
+        const zoom = Math.min(maxZoom, Math.max(1, targetW / cw));
+        const out = document.createElement('canvas');
+        out.width = Math.round(cw * zoom);
+        out.height = Math.round(ch * zoom);
+        const ctx = out.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(src, x, y, cw, ch, 0, 0, out.width, out.height);
+        return out;
+      }
+
+      // 统一加载：按 EXIF 摆正 + 限尺寸
+      let base = null;
       try {
         let src = null;
-        try {
-          src = await createImageBitmap(file, { imageOrientation: 'from-image' });
-        } catch (e) {
-          src = await createImageBitmap(file);   // 老浏览器不支持 orientation 选项
-        }
-        canvas = document.createElement('canvas');
+        try { src = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+        catch (e) { src = await createImageBitmap(file); }
+        base = document.createElement('canvas');
         const scale = Math.min(1, MAX_DIM / Math.max(src.width, src.height));
-        canvas.width = Math.max(1, Math.round(src.width * scale));
-        canvas.height = Math.max(1, Math.round(src.height * scale));
-        canvas.getContext('2d').drawImage(src, 0, 0, canvas.width, canvas.height);
+        base.width = Math.max(1, Math.round(src.width * scale));
+        base.height = Math.max(1, Math.round(src.height * scale));
+        base.getContext('2d').drawImage(src, 0, 0, base.width, base.height);
+        info.size = base.width + '×' + base.height;
       } catch (e) {
-        // 退路：用 <img> 加载（浏览器会自动应用 EXIF 方向）
         try {
           const url = URL.createObjectURL(file);
           const img = new Image();
           img.src = url;
           await img.decode();
-          canvas = document.createElement('canvas');
+          base = document.createElement('canvas');
           const scale = Math.min(1, MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight));
-          canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
-          canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
-          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+          base.width = Math.max(1, Math.round(img.naturalWidth * scale));
+          base.height = Math.max(1, Math.round(img.naturalHeight * scale));
+          base.getContext('2d').drawImage(img, 0, 0, base.width, base.height);
+          info.size = base.width + '×' + base.height;
           URL.revokeObjectURL(url);
-        } catch (e2) { canvas = null; }
+        } catch (e2) { base = null; }
       }
 
-      // 2) 原生 BarcodeDetector（安卓）
-      if (canvas && typeof window.BarcodeDetector === 'function') {
-        try {
-          const fmts = await nativeFormats();
-          if (fmts.length) {
-            const det = new window.BarcodeDetector({ formats: fmts });
-            const codes = await det.detect(canvas);
-            if (codes && codes.length) {
-              const text = String(codes[0].rawValue || '').trim();
-              if (text) return text;
-            }
-          }
-        } catch (e) { /* 继续走 ZXing */ }
-      }
+      // ① 整图
+      if (base) {
+        info.tried.push('整图');
+        let code = await tryNative(base);
+        if (code) return { code, info };
+        code = await tryZXing(base);
+        if (code) return { code, info };
 
-      // 3) ZXing 兜底（iOS 也支持）
-      const divId = 'scan-file-decode';
-      let div = document.getElementById(divId);
-      if (!div) {
-        div = document.createElement('div');
-        div.id = divId;
-        div.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px';
-        document.body.appendChild(div);
-      }
-      try {
-        let zxFile = file;
-        if (canvas) {
-          const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.92));
-          if (blob) zxFile = new File([blob], 'scan.jpg', { type: 'image/jpeg' });
+        // ② 居中裁剪 + 放大（数码变焦）：条码占画面较小时靠它救回
+        for (const [ratio, zoomLabel] of [[0.6, '居中放大60%'], [0.4, '居中放大40%']]) {
+          try {
+            info.tried.push(zoomLabel);
+            const zoomed = centerCropZoom(base, ratio, 2000, 3);
+            code = await tryNative(zoomed);
+            if (code) return { code, info };
+            code = await tryZXing(zoomed);
+            if (code) return { code, info };
+          } catch (e) { /* 忽略，继续兜底 */ }
         }
-        const h5 = new Html5Qrcode(divId, { formatsToSupport: H5_FORMATS, verbose: false });
-        const text = await h5.scanFile(zxFile, false);
-        await h5.clear();
-        return String(text || '').trim() || null;
-      } catch (e) {
-        return null;
       }
+
+      // ③ 原始文件直解（防 canvas 环节异常）
+      info.tried.push('原始文件');
+      const code = await tryZXing(file);
+      return { code, info };
     },
 
     /**
