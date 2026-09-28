@@ -11,6 +11,7 @@ const App = {
       loading: true,
       products: [],
       q: '',
+      nameQuery: '',
       manualCode: '',
       scan: { active: false, engine: '', error: '', manualShow: false, manualCode: '', starting: false, ready: false, slow: false, res: '', photoBusy: false, mode: 'lookup' },
       result: { show: false, product: null, barcode: '', editingPrice: false, priceDraft: '' },
@@ -28,12 +29,12 @@ const App = {
 
   computed: {
     filteredProducts() {
-      const q = (this.q || '').trim().toLowerCase();
-      if (!q) return this.products;
-      return this.products.filter(p =>
-        (p.name || '').toLowerCase().includes(q) ||
-        (p.barcode || '').includes(q) ||
-        (p.notes || '').toLowerCase().includes(q));
+      return ProductSearch.search(this.q || '', this.products);
+    },
+    /** 首页"按名字查价格"：相关度前 8 条 */
+    nameResults() {
+      if (!(this.nameQuery || '').trim()) return [];
+      return ProductSearch.search(this.nameQuery, this.products).slice(0, 8);
     },
     barcodeCount() {
       return this.products.filter(p => p.barcode).length;

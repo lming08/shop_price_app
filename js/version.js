@@ -3,7 +3,7 @@
 'use strict';
 
 const APP_BUILD = {
-  version: 'v13',
+  version: 'v14',
   date: '2026-09-26',
-  note: '扫码引擎重写：iPhone 改用 zxing-js 正规解码（修复 iPhone 扫码无反应）'
+  note: '新增按商品名字模糊查价（相关度排序），首页可直接按名字查'
 };

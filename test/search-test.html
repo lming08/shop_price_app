@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>SEARCH-TEST-PENDING</title>
+  <style>
+    body { font-family: -apple-system, "PingFang SC", sans-serif; max-width: 680px; margin: 30px auto; padding: 0 16px; }
+    .row { padding: 8px 12px; border-bottom: 1px solid #eee; }
+    .pass { color: #16A34A; font-weight: 700; }
+    .fail { color: #DC2626; font-weight: 700; }
+    #summary { font-size: 1.2rem; font-weight: 800; margin-top: 16px; }
+    code { background: #f4f4f4; padding: 1px 5px; border-radius: 5px; }
+  </style>
+</head>
+<body>
+  <h2>商品搜索相关度自测</h2>
+  <div id="list"></div>
+  <div id="summary"></div>
+
+  <script src="../js/search.js"></script>
+  <script>
+    'use strict';
+    const P = [
+      { id: '1', name: '农夫山泉 550ml', barcode: '6901236343104', notes: '门口冰柜', price: 2, updatedAt: 10 },
+      { id: '2', name: '可口可乐 330ml', barcode: '6920584430052', notes: '', price: 3, updatedAt: 20 },
+      { id: '3', name: '百事可乐 500ml', barcode: '6920000000000', notes: '', price: 3.5, updatedAt: 5 },
+      { id: '4', name: '怡宝矿泉水 555ml', barcode: '6921168509256', notes: '仓库', price: 2, updatedAt: 30 },
+      { id: '5', name: '茶叶蛋', barcode: '', notes: '现煮', price: 1.5, updatedAt: 40 },
+      { id: '6', name: '蔻斯汀沐浴露 380g', barcode: '4897031010322', notes: '', price: 29.9, updatedAt: 50 }
+    ];
+    const results = [];
+    function check(name, ok, detail) {
+      results.push(ok);
+      document.getElementById('list').insertAdjacentHTML('beforeend',
+        `<div class="row"><span class="${ok ? 'pass' : 'fail'}">${ok ? '✅' : '❌'}</span> ${name}` +
+        (detail ? ` —— ${detail}` : '') + '</div>');
+    }
+    const names = q => ProductSearch.search(q, P).map(p => p.name);
+    const first = q => names(q)[0] || '(无)';
+
+    // 1 子串匹配
+    check('“可乐”命中两款可乐', names('可乐').length === 2, names('可乐').join(' / '));
+    check('“可乐”：两款可乐并列（按更新时间）', names('可乐').includes('可口可乐 330ml') && names('可乐').includes('百事可乐 500ml'), names('可乐').join(' / '));
+    check('“可乐 330”按规格精确命中排第一', first('可乐 330') === '可口可乐 330ml', first('可乐 330'));
+    check('“百事”品牌命中排第一', first('百事') === '百事可乐 500ml', first('百事'));
+
+    // 2 空格归一化
+    check('“农夫山泉550”无空格也能匹配', first('农夫山泉550') === '农夫山泉 550ml', first('农夫山泉550'));
+
+    // 3 分词
+    check('“农夫 550”分词全命中', first('农夫 550') === '农夫山泉 550ml', first('农夫 550'));
+
+    // 4 字符按序（模糊）
+    check('“农泉”字符按序命中农夫山泉', names('农泉').includes('农夫山泉 550ml'), names('农泉').join(' / '));
+    check('“可330”字符按序命中可口可乐', names('可330').includes('可口可乐 330ml'), names('可330').join(' / '));
+
+    // 5 条码
+    check('条码完全一致排第一', first('6920584430052') === '可口可乐 330ml', first('6920584430052'));
+    check('条码前缀命中', first('6920584') === '可口可乐 330ml', first('6920584'));
+    check('条码尾号（4位以上）命中', first('4430052') === '可口可乐 330ml', first('4430052'));
+
+    // 6 名称精确
+    check('“茶叶蛋”完全一致排第一', first('茶叶蛋') === '茶叶蛋', first('茶叶蛋'));
+    check('“蛋”单字命中', names('蛋').includes('茶叶蛋'), names('蛋').join(' / '));
+    check('无条码商品不参与数字条码匹配', names('6920584').every(n => n !== '茶叶蛋'));
+
+    // 7 多结果与排序
+    check('“水”命中矿泉水（农夫山泉不含“水”字）', names('水').includes('怡宝矿泉水 555ml') && !names('水').includes('农夫山泉 550ml'), names('水').join(' / '));
+    check('“山泉”命中农夫山泉', names('山泉').includes('农夫山泉 550ml'), names('山泉').join(' / '));
+
+    // 8 备注与无结果
+    check('备注命中（冰柜）', names('冰柜').includes('农夫山泉 550ml'), names('冰柜').join(' / '));
+    check('不存在的商品返回空', names('不存在的商品啊').length === 0);
+    check('空查询返回全部', ProductSearch.search('', P).length === P.length);
+
+    const pass = results.filter(Boolean).length;
+    const total = results.length;
+    document.getElementById('summary').innerHTML = pass === total
+      ? `<span class="pass">全部通过：${pass}/${total}</span>`
+      : `<span class="fail">通过 ${pass}/${total}，存在失败项</span>`;
+    document.title = pass === total ? 'SEARCH-TEST-ALL-PASS' : 'SEARCH-TEST-FAILED';
+  </script>
+</body>
+</html>

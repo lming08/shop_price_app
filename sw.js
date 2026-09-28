@@ -2,7 +2,7 @@
  * 注意：更新前端文件后把这里和 js/version.js 的版本号一起 +1，老用户才能拿到新版本 */
 'use strict';
 
-const CACHE = 'baojie-price-v13';
+const CACHE = 'baojie-price-v14';
 const ASSETS = [
   './',
   'index.html',
@@ -13,6 +13,7 @@ const ASSETS = [
   'js/scanner.js',
   'js/excel.js',
   'js/backup.js',
+  'js/search.js',
   'js/app.js',
   'lib/vue.global.prod.js',
   'lib/zxing.min.js',
@@ -42,6 +43,10 @@ self.addEventListener('message', (e) => {
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET' || !req.url.startsWith(self.location.origin)) return;
+  // 测试页/测试素材不走缓存（开发调试用，永远取最新）
+  try {
+    if (new URL(req.url).pathname.includes('/test/')) return;
+  } catch (err) { /* ignore */ }
   e.respondWith(
     caches.match(req, { ignoreSearch: true }).then((cached) => {
       if (cached) return cached;
